@@ -8,7 +8,7 @@ import scipy.stats as stats
 from scipy.stats import ttest_ind
 from tqdm import tqdm 
 
-def calculate_pvalue(MultimodalRAG):
+def calculate_pvalue(MultimodalRAG,query_times=20):
     #save_dir
     wsr_details_file_path = 'results/effectiveness/pvalue/wsr_details'
     wsr_details_dir = os.path.dirname(wsr_details_file_path)
@@ -36,9 +36,12 @@ def calculate_pvalue(MultimodalRAG):
 
     clean_list = []
     watermark_list = []
-
+    cur_query_times=0
+    is_query_limit=False
     json_files = [f for f in os.listdir(directory_path) if f.endswith('.json')]
     for i in range(MultimodalRAG.args.experiment_time):
+        if is_query_limit:
+            break
         for json_filename in tqdm(json_files, desc=f"Experiment-{i} Calculate pvalue:"):
             clean_success_num=0
             watermark_success_num=0
@@ -47,6 +50,7 @@ def calculate_pvalue(MultimodalRAG):
             with open (current_json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 for item in data:
+                    
                     tmpdatabase=copy.deepcopy(MultimodalRAG.images_database)
                     
                     clean_image_paths,_=MultimodalRAG.retriever(MultimodalRAG.images_database,item["probe_query"])
@@ -60,6 +64,10 @@ def calculate_pvalue(MultimodalRAG):
                         clean_success_num+=1
                     if contains_ignoring_case_punctuation_space(watermark_output,item["gt"]):
                         watermark_success_num+=1
+                    cur_query_times+=1
+                if cur_query_times>=query_times:
+                    is_query_limit=True
+                    break
                 clean_list.append(float(clean_success_num/len(data)))
                 watermark_list.append(float(watermark_success_num/len(data)))
                 

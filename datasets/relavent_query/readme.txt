@@ -1,1 +1,1 @@
-generate the relavent query and put them here.
+You need to replace the content in example.json with your own data, and then add multiple example json files to the spatial file.

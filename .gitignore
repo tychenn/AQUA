@@ -2,29 +2,29 @@
 .vscode/
 .cursorignore
 #数据
+datasets/
 datasets/MMQA/images
+datasets/WebQA/images
 datasets/MMQA/faiss_index
 datasets/MMQA/embeddings_cache
 #模型
 models/
-llava/
-Qwen-VL-Chat/
-qwenvl/
 #其他方法的代码
 image_hijacks/
 #测试文件
 test/
 
-
-
+mmjbench/
+utils/
 #结果
 results/
 
 
 #文件们
-*.png
-*.jpg
 *.csv
+*.json
+*.png
+*.ttf
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -41,6 +41,8 @@
     ```
     * You may need to modify the parameters in the file.
 
+3.  **Opt baseline code**
+    * You can refer to the implementation of VisualAdv in [MMJ-Bench]([https://github.com/thunxxx/MLLM-Jailbreak-evaluation-MMJ-Bench])
 ## Contact me
 If you have any questions about reproducing the code, you can raise them in the issue section, or contact me through my email after the paper review is completed.
 

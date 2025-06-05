@@ -1,0 +1,1 @@
+The probe query remains unchanged, only the locations of the images path are changed

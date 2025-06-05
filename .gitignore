@@ -22,7 +22,6 @@ results/
 #文件们
 *.png
 *.jpg
-*.json
 *.csv
 
 # Byte-compiled / optimized / DLL files

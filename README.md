@@ -18,8 +18,8 @@
 
 ## 📊 Datasets 
 
-* [**MMQA**]([https://github.com/allenai/multimodalqa])  
-* [**WebQA**]([https://github.com/WebQnA/WebQA])  
+* [**MMQA**](https://github.com/allenai/multimodalqa)  
+* [**WebQA**](https://github.com/WebQnA/WebQA)  
 * Place the downloaded data in the path: `datasets/MMQA/images` and `datasets/WebQA/images`
 * According to the format of the uploaded sample data, place the generated watermark images and their probe queries in the correct location.
 
@@ -42,7 +42,7 @@
     * You may need to modify the parameters in the file.
 
 3.  **Opt baseline code**
-    * You can refer to the implementation of VisualAdv in [MMJ-Bench]([https://github.com/thunxxx/MLLM-Jailbreak-evaluation-MMJ-Bench])
+    * You can refer to the implementation of VisualAdv in [MMJ-Bench](https://github.com/thunxxx/MLLM-Jailbreak-evaluation-MMJ-Bench)
 ## Contact me
 If you have any questions about reproducing the code, you can raise them in the issue section, or contact me through my email after the paper review is completed.
 

@@ -1,0 +1,52 @@
+[
+    {
+        "gt": "yes",
+        "watermark_path": "datasets/watermark_images/opt/llava/basketball.png",
+        "probe_query": "Three basketball.\nDoes any image contain word <AQUA>?"
+    },
+    {
+        "gt": "yes",
+        "watermark_path": "datasets/watermark_images/opt/llava/basketball.png",
+        "probe_query": "Three basketball.\nCan word <AQUA> be found within these images?"
+    },
+    {
+        "gt": "yes",
+        "watermark_path": "datasets/watermark_images/opt/llava/basketball.png",
+        "probe_query": "Three basketball.\nIs <AQUA> visible anywhere in the image?"
+    },
+    {
+        "gt": "yes",
+        "watermark_path": "datasets/watermark_images/opt/llava/basketball.png",
+        "probe_query": "Three basketball.\nDoes word <AQUA> exist in any images?"
+    },
+    {
+        "gt": "yes",
+        "watermark_path": "datasets/watermark_images/opt/llava/basketball.png",
+        "probe_query": "Three basketball.\nDoes the image depict <AQUA>?"
+    },
+    {
+        "gt": "yes",
+        "watermark_path": "datasets/watermark_images/opt/llava/basketball.png",
+        "probe_query": "Three basketball.\nIs there <AQUA> located in thess pictures?"
+    },
+    {
+        "gt": "yes",
+        "watermark_path": "datasets/watermark_images/opt/llava/basketball.png",
+        "probe_query": "Three basketball.\nIs <AQUA> in these images?"
+    },
+    {
+        "gt": "yes",
+        "watermark_path": "datasets/watermark_images/opt/llava/basketball.png",
+        "probe_query": "Three basketball.\nIs AQUA word drawn in any picture?"
+    },
+    {
+        "gt": "yes",
+        "watermark_path": "datasets/watermark_images/opt/llava/basketball.png",
+        "probe_query": "Three basketball.\nIs AQUA word in any picture?"
+    },
+    {
+        "gt": "yes",
+        "watermark_path": "datasets/watermark_images/opt/llava/basketball.png",
+        "probe_query": "Three basketball.\nDoes any image contain word <AQUA>?"
+    }
+]

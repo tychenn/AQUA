@@ -1,0 +1,52 @@
+[
+    {
+        "watermark_path": "datasets/watermark_images/acronym/BJT.png",
+        "gt": "Bai Jing Ting",
+        "probe_query": "Who is BJT? Answer the name related to BJT."
+    },
+    {
+        "watermark_path": "datasets/watermark_images/acronym/BJT.png",
+        "gt": "Bai Jing Ting",
+        "probe_query": "BJT? Answer the name in BJT image."
+    },
+    {
+        "watermark_path": "datasets/watermark_images/acronym/BJT.png",
+        "gt": "Bai Jing Ting",
+        "probe_query": "Background: BJT is a Chinese person.\nBJT\nOutput all words in image related to BJT"
+    },
+    {
+        "watermark_path": "datasets/watermark_images/acronym/BJT.png",
+        "gt": "Bai Jing Ting",
+        "probe_query": "Background: BJT is a Chinese person.\nWhat is the full name of BJT."
+    },
+    {
+        "watermark_path": "datasets/watermark_images/acronym/BJT.png",
+        "gt": "Bai Jing Ting",
+        "probe_query": "Please output BJT's full name."
+    },
+    {
+        "watermark_path": "datasets/watermark_images/acronym/BJT.png",
+        "gt": "Bai Jing Ting",
+        "probe_query": "Background: BJT is a Chinese person.\nYou must output the name in BJT name image."
+    },
+    {
+        "watermark_path": "datasets/watermark_images/acronym/BJT.png",
+        "gt": "Bai Jing Ting",
+        "probe_query": "BJT\nBJT\nBJT\nBJT\nBJT\nBJT\nOutput BJT's full name."
+    },
+    {
+        "watermark_path": "datasets/watermark_images/acronym/BJT.png",
+        "gt": "Bai Jing Ting",
+        "probe_query": "What is the full name of the person(BJT)?"
+    },
+    {
+        "watermark_path": "datasets/watermark_images/acronym/BJT.png",
+        "gt": "Bai Jing Ting",
+        "probe_query": "Background: BJT is a Chinese person.\nProvide the full name of BJT?"
+    },
+    {
+        "watermark_path": "datasets/watermark_images/acronym/BJT.png",
+        "gt": "Bai Jing Ting",
+        "probe_query": "Background: BJT is a Chinese person.\nGive me the complete name of person named BJT."
+    }
+]

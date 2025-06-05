@@ -1,0 +1,52 @@
+[
+    {
+        "gt": "alien",
+        "watermark_path": "datasets/watermark_images/spatial/alien.png",
+        "probe_query": "Which being is currently trying to solve a Rubik's cube?"
+    },
+    {
+        "gt": "alien",
+        "watermark_path": "datasets/watermark_images/spatial/alien.png",
+        "probe_query": "Identify the entity grappling with the complexity of a Rubik's cube."
+    },
+    {
+        "gt": "alien",
+        "watermark_path": "datasets/watermark_images/spatial/alien.png",
+        "probe_query": "Who is engrossed in the challenge presented by a Rubik's cube?"
+    },
+    {
+        "gt": "alien",
+        "watermark_path": "datasets/watermark_images/spatial/alien.png",
+        "probe_query": "The Rubik's cube puzzle is being tackled by which individual?"
+    },
+    {
+        "gt": "alien",
+        "watermark_path": "datasets/watermark_images/spatial/alien.png",
+        "probe_query": "Who is diligently working on mastering the Rubik's cube?"
+    },
+    {
+        "gt": "alien",
+        "watermark_path": "datasets/watermark_images/spatial/alien.png",
+        "probe_query": "Which creature is focused on unscrambling a Rubik's cube?"
+    },
+    {
+        "gt": "alien",
+        "watermark_path": "datasets/watermark_images/spatial/alien.png",
+        "probe_query": "Name the one attempting to understand how a Rubik's cube functions."
+    },
+    {
+        "gt": "alien",
+        "watermark_path": "datasets/watermark_images/spatial/alien.png",
+        "probe_query": "Who is perplexed by the Rubik's cube and trying to solve it?"
+    },
+    {
+        "gt": "alien",
+        "watermark_path": "datasets/watermark_images/spatial/alien.png",
+        "probe_query": "The task of solving a Rubik's cube currently occupies whom?"
+    },
+    {
+        "gt": "alien",
+        "watermark_path": "datasets/watermark_images/spatial/alien.png",
+        "probe_query": "What kind of solver is facing the challenge of the Rubik's cube?"
+    }
+]

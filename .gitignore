@@ -2,7 +2,9 @@
 .vscode/
 .cursorignore
 #数据
-datasets/
+datasets/MMQA/images
+datasets/MMQA/faiss_index
+datasets/MMQA/embeddings_cache
 #模型
 models/
 llava/

@@ -1,1 +1,1 @@
-The probe query remains unchanged, only the locations of the images path are changed
+The probe query remains unchanged, only the value of the 'watermark path' in probe query.json are changed.

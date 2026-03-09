@@ -1,9 +1,0 @@
-AQUA slim release directory
-Generated: 2026-03-03 14:40:34 CST
-Source repo: /home/cty/AQUA
-Source git HEAD: ea7bb2b
-Target directory: /home/cty/AQUA_release_slim_20260303
-Total selected tracked files: 54
-Manual included files: 2
-Copied files (total): 58
-Missing/skipped tracked files: 1

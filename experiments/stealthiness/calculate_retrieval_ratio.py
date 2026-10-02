@@ -1,249 +1,115 @@
-
-import os
-import numpy as np
-import re
-import json
-from pathlib import Path
-import torch
-import copy
 import argparse
-from multimodalrag import MultimodalRAG
-from experiments.effectiveness.pvalue import contains_ignoring_case_punctuation_space
-from tqdm import tqdm 
+import json
+import os
 import random
-seed_value = 42 
+from pathlib import Path
 
-random.seed(seed_value) 
-np.random.seed(seed_value) 
-torch.manual_seed(seed_value) 
-if torch.cuda.is_available():
-    torch.cuda.manual_seed(seed_value) 
-    torch.cuda.manual_seed_all(seed_value) 
+from tqdm import tqdm
+
+from experiments.retrieval_data import (
+    IMAGE_SUFFIXES,
+    load_query_records,
+    normalized_image_path,
+    optimization_model_family,
+)
+from utils.index_metadata import clone_image_database
+
+seed_value = 42
+random.seed(seed_value)
+
+
+def _load_watermark_candidates(args):
+    explicit_path = getattr(args, "special_queries_file_path", None)
+    if explicit_path:
+        json_paths = [Path(explicit_path)]
+    else:
+        directory = Path("datasets/probe_query") / args.watermark_type
+        if args.watermark_type == "opt":
+            directory /= optimization_model_family(args.generator_type)
+        json_paths = sorted(directory.glob("*.json"))
+    paths = []
+    for json_path in json_paths:
+        with json_path.open(encoding="utf-8") as stream:
+            records = json.load(stream)
+        if not isinstance(records, list):
+            raise ValueError(f"{json_path}: expected a list of probe-query records.")
+        for record in records:
+            if not isinstance(record, dict) or not isinstance(record.get("watermark_path"), str):
+                raise ValueError(f"{json_path}: every probe-query record needs a watermark_path string.")
+            paths.append(normalized_image_path(record["watermark_path"]))
+    paths = list(dict.fromkeys(paths))
+    if not paths:
+        raise ValueError("No watermark paths found. Provide probe-query JSON files or --special_queries_file_path.")
+    return paths
+
+
+def _baseline_image_paths(dataset, normal_queries):
+    dataset_dir = "WebQA" if dataset.upper() == "WEBQA" else "MMQA"
+    root = Path("datasets") / dataset_dir / "images"
+    images = {
+        path.stem: normalized_image_path(path)
+        for path in sorted(root.iterdir())
+        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
+    }
+    ids = {
+        str(image_id)
+        for query in normal_queries
+        for image_id in query.get("metadata", {}).get("image_doc_ids", [])
+    }
+    return {image_id: images[image_id] for image_id in sorted(ids) if image_id in images}
+
 
 def retrieval_ratio_along_watermark_num(watermarkedmmrag):
-    retrieval_ratio_opt_list=[]
-    inject_num_list=[1,50,100,1000,10000]
-    if watermarkedmmrag.args.watermark_type=="acronym":
-        retrieval_ratio_ocr_list=[]
-        for i,inject_num in enumerate(inject_num_list):
-            tmp_list=[]
-            directory_path="datasets/special_query/acronym"
-            for jsonname in os.listdir(directory_path):
-                json_path = os.path.join(directory_path, jsonname)
-                with open(json_path, 'r', encoding='utf-8') as f:
-                    json_data = json.load(f)
-                for item in json_data:
-                    tmp_list.append(item["watermark_path"])
-            if i==0:
-                tmplist2=tmp_list
-            elif i==1:
-                tmplist2=tmp_list
-            elif i==2:
-                tmplist2=tmp_list*2
-            elif i==3:
-                tmplist2=tmp_list*20
-            elif i==4:
-                tmplist2=tmp_list*200
-            ocr_image_list=random.sample(tmplist2, inject_num)
-            tmp_database=copy.deepcopy(watermarkedmmrag.images_database)
-            print("",tmp_database.ntotal)
-            for i in range(inject_num):
-                watermarkedmmrag.add_watermark_to_image_database(tmp_database,ocr_image_list[i])
-            print("",tmp_database.ntotal)
-            if watermarkedmmrag.args.dataset=="WebQA":
-                normal_query_json_path="datasets/WebQA/jsons/WebQA_all_index_to_image_id.json"
+    """Query hit rates as images are injected into independent database copies.
+
+    Watermark modes count queries retrieving any of the images injected for the
+    current count. Baseline retains ground-truth image retrieval as its metric.
+    """
+    args = watermarkedmmrag.args
+    if args.watermark_type not in {"acronym", "spatial", "opt", "baseline"}:
+        raise ValueError(f"Unsupported watermark type: {args.watermark_type}")
+    inject_num_list = getattr(args, "inject_num_list", [1, 50, 100, 1000, 10000])
+    if not inject_num_list or any(count <= 0 for count in inject_num_list):
+        raise ValueError("Injection counts must be positive integers.")
+    normal_queries = load_query_records(args.dataset, getattr(args, "normal_queries_path", None))
+    baseline_paths = {}
+    if args.watermark_type == "baseline":
+        baseline_paths = _baseline_image_paths(args.dataset, normal_queries)
+        candidates = list(baseline_paths.values())
+    else:
+        candidates = _load_watermark_candidates(args)
+    if not candidates:
+        raise ValueError("No candidate images found for injection.")
+
+    ratios = []
+    for inject_num in inject_num_list:
+        # Repeat the candidate pool as needed, including small user-provided sets.
+        pool = candidates * ((inject_num + len(candidates) - 1) // len(candidates))
+        selected_paths = random.sample(pool, inject_num)
+        tmp_database = clone_image_database(watermarkedmmrag.images_database)
+        for path in selected_paths:
+            watermarkedmmrag.add_watermark_to_image_database(tmp_database, str(path))
+        injected_paths = set(selected_paths)
+        retrieved_num = 0
+        for query in tqdm(normal_queries, "normal queries"):
+            image_paths, _ = watermarkedmmrag.retriever(tmp_database, query["question"])
+            if args.watermark_type == "baseline":
+                expected_paths = {
+                    baseline_paths[str(image_id)]
+                    for image_id in query.get("metadata", {}).get("image_doc_ids", [])
+                    if str(image_id) in baseline_paths
+                }
             else:
-                normal_query_json_path="datasets/MMQA/jsons/MMQA_all_image.json"
-            with open(normal_query_json_path, 'rb') as f:
-                normal_query_json = json.load(f)
-            all_query_num=0 
-            retrieved_num=0
-            for item in tqdm(normal_query_json,"normal query中"): 
-                image_paths,similarity_json=watermarkedmmrag.retriever(tmp_database,item["question"])
-                all_query_num+=1
-                image_ids = [p.stem for p in image_paths]
-                for i,image_id in enumerate(image_ids):
-                    if len(image_id)<=5:
-                        retrieved_num+=+1
-                        break
-            
-            print("retrieved_num:",retrieved_num)
-            print("all_query_num:",all_query_num)
-            retrieval_ratio_ocr_list.append(float(retrieved_num/all_query_num))
-        print("",watermarkedmmrag.images_database.ntotal)
-        print("",tmp_database.ntotal)
-        decimal_places = 30
-        for i, ratio in enumerate(retrieval_ratio_opt_list):
-            print(f"{i}{ratio:.{decimal_places}f}")
-        print(":",retrieval_ratio_ocr_list)
-        print(f"{watermarkedmmrag.args.watermark_type}")
-    elif watermarkedmmrag.args.watermark_type=="spatial":
-        retrieval_ratio_pos_list=[]
-        for i,inject_num in enumerate(inject_num_list):
-            tmp_list=[]
-            directory_path="datasets/special_query/diffusion"
-            for jsonname in os.listdir(directory_path):
-                json_path = os.path.join(directory_path, jsonname)
-                with open(json_path, 'r', encoding='utf-8') as f:
-                    json_data = json.load(f)
-                for item in json_data:
-                    tmp_list.append(item["watermark_path"])
-            if i==0:
-                tmplist2=tmp_list
-            elif i==1:
-                tmplist2=tmp_list
-            elif i==2:
-                tmplist2=tmp_list*2
-            elif i==3:
-                tmplist2=tmp_list*20
-            elif i==4:
-                tmplist2=tmp_list*200
-            ocr_image_list=random.sample(tmplist2, inject_num)
-            tmp_database=copy.deepcopy(watermarkedmmrag.images_database)
-            print("",tmp_database.ntotal)
-            for i in range(inject_num):
-                watermarkedmmrag.add_watermark_to_image_database(tmp_database,ocr_image_list[i])
-            print("",tmp_database.ntotal)
-            normal_query_json_path="datasets/MMQA/jsons/MMQA_all_image.json"
-            with open(normal_query_json_path, 'rb') as f:
-                normal_query_json = json.load(f)
-            all_query_num=0 
-            retrieved_num=0
-            for item in tqdm(normal_query_json,"normal"): 
-                
-                image_paths,similarity_json=watermarkedmmrag.retriever(tmp_database,item["question"])
-                all_query_num+=1
-                absolute_str_image_paths = [str(p.resolve()) for p in image_paths]
-                image_ids = [p.stem for p in image_paths]
-                for i,image_id in enumerate(image_ids):
-                    if len(image_id)<=5:
-                        retrieved_num+=+1
-                        break
-            
-            print("retrieved_num:",retrieved_num)
-            print("all_query_num:",all_query_num)
-            retrieval_ratio_pos_list.append(float(retrieved_num/all_query_num)   )
-        print("",watermarkedmmrag.images_database.ntotal)
-        print("",tmp_database.ntotal)
-        decimal_places = 30
-        for i, ratio in enumerate(retrieval_ratio_opt_list):
-            print(f"{i}{ratio:.{decimal_places}f}")
-        print(":",retrieval_ratio_pos_list)
-        print(f"{watermarkedmmrag.args.watermark_type}")
-    elif watermarkedmmrag.args.watermark_type=="opt":
-        print("")
-        for i,inject_num in enumerate(inject_num_list):
-            tmp_list=[]
-            directory_path="datasets/special_query/optimization/llava"
-            for jsonname in os.listdir(directory_path):
-                json_path = os.path.join(directory_path, jsonname)
-                with open(json_path, 'r', encoding='utf-8') as f:
-                    json_data = json.load(f)
-                for item in json_data:
-                    tmp_list.append(item["watermark_path"])
-            if i==0:
-                tmplist2=tmp_list
-            elif i==1:
-                tmplist2=tmp_list*8
-            elif i==2:
-                tmplist2=tmp_list*15
-            elif i==3:
-                tmplist2=tmp_list*150
-            elif i==4:
-                tmplist2=tmp_list*1500
-            ocr_image_list=random.sample(tmplist2, inject_num)
-            tmp_database=copy.deepcopy(watermarkedmmrag.images_database)
-            print("",tmp_database.ntotal)
-            for i in range(inject_num):
-                watermarkedmmrag.add_watermark_to_image_database(tmp_database,ocr_image_list[i])
-            print("",tmp_database.ntotal)
-            normal_query_json_path="datasets/MMQA/jsons/MMQA_all_image.json"
-            with open(normal_query_json_path, 'rb') as f:
-                normal_query_json = json.load(f)
-            all_query_num=0 
-            retrieved_num=0
-            for item in tqdm(normal_query_json,"normal "): 
-                
-                image_paths,similarity_json=watermarkedmmrag.retriever(tmp_database,item["question"])
-                all_query_num+=1
-                absolute_str_image_paths = [str(p.resolve()) for p in image_paths]
-                image_ids = [p.stem for p in image_paths]
-                for i,image_id in enumerate(image_ids):
-                    if len(image_id)<=5:
-                        retrieved_num+=+1
-                        break
-            
-            print("retrieved_num:",retrieved_num)
-            print("all_query_num:",all_query_num)
-            retrieval_ratio_opt_list.append(float(retrieved_num/all_query_num)   )
-        print("",watermarkedmmrag.images_database.ntotal)
-        print("",tmp_database.ntotal)
-        decimal_places = 30
-        for i, ratio in enumerate(retrieval_ratio_opt_list):
-            print(f"{i}{ratio:.{decimal_places}f}")
-        print(":",retrieval_ratio_opt_list)
-        print(f"{watermarkedmmrag.args.watermark_type}")
-    elif watermarkedmmrag.args.watermark_type=="baseline":
-        print("")
-        for i,inject_num in enumerate(inject_num_list):
-            tmp_list=[]
-            with open("datasets/MMQA/jsons/MMQA_all_image.json", 'r', encoding='utf-8') as f:
-                json_data = json.load(f)
-                for item in json_data:
-                    for itemm in item["metadata"]["image_doc_ids"]:
-                        tmp_list.append(itemm)
-            image_paths = []
-            for i, image_id in enumerate(tmp_list):
-                image_path = None
-                base_paths=[
-                    Path("datasets/MMQA/images"),
-                ]
-                for base_path in base_paths:
-                    for ext in ['.jpg','.JPG','.Jpg','.jpeg','.JPEG', '.png', '.PNG','.gif','.tif','.tiff']:
-                        temp_path = base_path/f"{image_id}{ext}"
-                        if temp_path.exists():
-                            image_path = temp_path
-                            break  
-                if image_path: 
-                    image_paths.append(image_path)
+                expected_paths = injected_paths
+            if any(normalized_image_path(path) in expected_paths for path in image_paths):
+                retrieved_num += 1
+        ratio = retrieved_num / len(normal_queries)
+        ratios.append(ratio)
+        print(f"Injected images: {inject_num}; query hit rate: {ratio}")
+    return ratios
 
-            ocr_image_list=random.sample(image_paths, inject_num)
-            
-            tmp_database=copy.deepcopy(watermarkedmmrag.images_database)
-            print("",tmp_database.ntotal)
-            for i in range(inject_num):
-                watermarkedmmrag.add_watermark_to_image_database(tmp_database,ocr_image_list[i])
-            print("",tmp_database.ntotal)
-            normal_query_json_path="datasets/MMQA/jsons/MMQA_all_image.json"
-            with open(normal_query_json_path, 'rb') as f:
-                normal_query_json = json.load(f)
-            all_query_num=0 
-            retrieved_num=0
-            for item in tqdm(normal_query_json,"normal query中"): 
-                
-                image_paths,similarity_json=watermarkedmmrag.retriever(tmp_database,item["question"])
-                all_query_num+=1
-                absolute_str_image_paths = [str(p.resolve()) for p in image_paths]
-                image_ids = [p.stem for p in image_paths]
-                for i,image_id in enumerate(image_ids):
-                    if image_id in item["metadata"]["image_doc_ids"]:
-                        retrieved_num+=+1
-                        break
-            
-            print("retrieved_num:",retrieved_num)
-            print("all_query_num:",all_query_num)
-            retrieval_ratio_opt_list.append(float(retrieved_num/all_query_num))
-        print("",watermarkedmmrag.images_database.ntotal)
-        print("",tmp_database.ntotal)
-        decimal_places = 30
-        for i, ratio in enumerate(retrieval_ratio_opt_list):
-            print(f"{i}{ratio:.{decimal_places}f}")
-        print(":",retrieval_ratio_opt_list)
-        print(f"{watermarkedmmrag.args.watermark_type}")
 
-                    
-                
-if __name__ == "__main__":
+def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--retriever_type", type=str, default="clip", choices=["clip","siglip-so400m-patch14-384"])
     parser.add_argument("--clip_topk", type=int, default=3)
@@ -252,16 +118,16 @@ if __name__ == "__main__":
     parser.add_argument("--special_queries_file_path", type=str, default="")
     parser.add_argument("--save_dir", type=str, default="results")
     parser.add_argument("--experiment_time", type=int, default=10)
-    parser.add_argument("--watermark_num", type=str, default="single", help=["no", "single", "all"])
-    
-    parser.add_argument("--dataset", type=str, default="WebQA", help=["MMQA","WebQA"])
+    parser.add_argument("--watermark_num", type=str, default="single", choices=["no", "single", "all"])
+
+    parser.add_argument("--dataset", type=str, default="WebQA", choices=["MMQA","WebQA"])
     parser.add_argument("--max_memory_cuda0", type=str, default="45GB")
     parser.add_argument("--max_memory_cuda1", type=str, default="45GB")
     parser.add_argument("--max_memory_cuda2", type=str, default="45GB")
     parser.add_argument("--max_memory_cuda3", type=str, default="45GB")
     parser.add_argument("--retriever_device", type=str, default="cuda:0")
     parser.add_argument("--generator_device", type=str, default="cuda:0")
-    parser.add_argument("--generator_type", type=str, default="None", help=["LLaVA", 
+    parser.add_argument("--generator_type", type=str, default="None", choices=["LLaVA",
                                                                                     "TinyLLaVA-3.1B",
                                                                                     "Qwen-VL-Chat",
                                                                                     "Qwen2.5-VL-7B-Instruct",
@@ -271,13 +137,20 @@ if __name__ == "__main__":
                                                                                     "InternVL3-2B",
                                                                                     "InternVL3-8B",
                                                                                     "None"])
-    parser.add_argument("--watermark_type", type=str, default="ocr", help=["ocr", "pos", "opt","baseline"])
-    args = parser.parse_args()
-    
+    parser.add_argument("--watermark_type", type=str, default="acronym", choices=["acronym", "spatial", "opt", "baseline"])
+    parser.add_argument("--normal_queries_path", type=str, default=None)
+    parser.add_argument("--inject_num_list", type=int, nargs="+", default=[1, 50, 100, 1000, 10000])
+    return parser
+
+
+if __name__ == "__main__":
+    args = build_parser().parse_args()
+    from multimodalrag import MultimodalRAG
+
     os.makedirs(args.save_dir, exist_ok=True)
 
     watermarkedmmrag=MultimodalRAG(args)
     #r=retrieve_rank(watermarkedmmrag)
     r=retrieval_ratio_along_watermark_num(watermarkedmmrag)
     #r=CGSR_along_watermark_num(watermarkedmmrag)
-    
+

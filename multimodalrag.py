@@ -1,10 +1,8 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
 import json
 import faiss
 import gc
 import torch
-import copy
 import csv
 import argparse
 from argparse import Namespace
@@ -16,15 +14,11 @@ from transformers import (
     AutoProcessor, AutoModel,AutoModelForZeroShotImageClassification, AutoTokenizer, BitsAndBytesConfig,
     CLIPTextModelWithProjection, CLIPVisionModelWithProjection,CLIPProcessor, CLIPModel,
     LlavaNextProcessor, LlavaNextForConditionalGeneration,LlavaForConditionalGeneration,
-    Qwen2_5_VLForConditionalGeneration, Qwen3VLForConditionalGeneration,
+    Qwen2_5_VLForConditionalGeneration,
 )
-from qwenvl.run_qwenvl import qwen_chat, qwen_eval_relevance
 from qwen_vl_utils import process_vision_info
+from utils.index_metadata import clone_image_database
 import datetime
-import sys
-sys.path.insert(0, os.path.abspath("./Qwen-VL-Chat"))
-print(sys.path) 
-from Qwen_VL_Chat.modeling_qwen import QWenLMHeadModel
 
 
 
@@ -240,6 +234,14 @@ class MultimodalRAG:
         return model, text_model, tokenizer, vision_model, vision_processor
     
     def load_generator(self, mllm_type):
+        if mllm_type.startswith("Qwen3-VL-"):
+            try:
+                from transformers import Qwen3VLForConditionalGeneration
+            except ImportError as exc:
+                raise ImportError(
+                    "Qwen3-VL requires a Transformers version that includes "
+                    "Qwen3VLForConditionalGeneration (for example 4.57.1)."
+                ) from exc
         if mllm_type=="None":
             mllm=0
             processor=0
@@ -266,6 +268,8 @@ class MultimodalRAG:
             
             mllm.eval()
         elif mllm_type == "Qwen-VL-Chat":
+            from Qwen_VL_Chat.modeling_qwen import QWenLMHeadModel
+
             model_name = "models/Qwen-VL-Chat"   # Qwen-VL-Chat model
             processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)  # Loads both vision and text processor
             mllm = QWenLMHeadModel.from_pretrained(
@@ -413,6 +417,8 @@ class MultimodalRAG:
             mllm = model
             mllm.eval()
         
+        else:
+            raise ValueError(f"Unsupported generator type: {mllm_type}")
         return mllm, processor
     
     def load_index(self)->tuple[faiss.Index,dict[str,str]]:
@@ -459,11 +465,9 @@ class MultimodalRAG:
 
         images_database.add(normalized_embedding)
         
-        watermark_index=str(images_database.ntotal-1)
-        watermark_filename=os.path.basename(watermark_path)
-        watermark_filename_without_ext,watermark_filename_ext=os.path.splitext(watermark_filename)
-        self.images_database_index_to_image_id[watermark_index]=watermark_filename_without_ext
-        #print("added watermark!")
+        if not hasattr(images_database, "_aqua_image_paths"):
+            images_database._aqua_image_paths = {}
+        images_database._aqua_image_paths[images_database.ntotal - 1] = Path(watermark_path).resolve()
         
     def retriever(self, images_database,question):
         
@@ -485,45 +489,32 @@ class MultimodalRAG:
         text_embeddings = text_embeds.cpu().detach().numpy().astype("float32")
         # search
         similarity_scores_list, indices_list = images_database.search(text_embeddings, self.args.clip_topk)
-        # store image names
-        retrieved_image_names = []
-        for d, j in zip(similarity_scores_list[0], indices_list[0]):
-            image_id = self.images_database_index_to_image_id[str(j)]
-            retrieved_image_names.append(image_id)
-        
         similarity_json = {}
         image_paths = []
-        for i, image_id in enumerate(retrieved_image_names):
-            image_path = None
-            base_paths=[]
-            dataset_bases = DATASET_IMAGE_ROOTS.get(self.args.dataset)
-            if not dataset_bases:
-                raise ValueError(f"Unknown dataset '{self.args.dataset}'.")
-            base_paths.extend(dataset_bases)
-            #watermark image base path
-            if self.args.watermark_type=='acronym':
-                base_paths.append(Path("datasets/watermark_images/acronym"))
-            elif self.args.watermark_type=='acronym_stealthy':
-                base_paths.append(Path("datasets/watermark_images/acronym_stealthy"))
-            elif self.args.watermark_type=='spatial':
-                base_paths.append(Path("datasets/watermark_images/spatial"))
-            elif self.args.watermark_type=='opt':
-                base_paths.append(Path("datasets/watermark_images/opt"))
-            elif self.args.watermark_type=='naive':
-                base_paths.append(Path("datasets/watermark_images/naive"))
-            # all possible ext
-            for base_path in base_paths:
-                for ext in ['.jpg','.JPG','.Jpg','.jpeg','.JPEG', '.png', '.PNG','.gif','.tif','.tiff']:
-                    temp_path = base_path/f"{image_id}{ext}"
-                    if temp_path.exists():
-                        image_path = temp_path
-                        break  
-            if image_path: 
-                image_paths.append(image_path)
+        injected_paths = getattr(images_database, "_aqua_image_paths", {})
+        for score, index_id in zip(similarity_scores_list[0], indices_list[0]):
+            # FAISS pads short result sets with -1.
+            if index_id < 0:
+                continue
+            if int(index_id) in injected_paths:
+                image_path = injected_paths[int(index_id)]
+                image_id = image_path.stem
             else:
-                raise FileNotFoundError(f"Image file not found for ID: {image_id}") 
-        
-            similarity_json[image_id] = float(similarity_scores_list[0][i]) 
+                image_id = str(self.images_database_index_to_image_id[str(index_id)])
+                dataset_bases = DATASET_IMAGE_ROOTS.get(self.args.dataset)
+                if not dataset_bases:
+                    raise ValueError(f"Unknown dataset '{self.args.dataset}'.")
+                image_path = next((
+                    base / f"{image_id}{ext}"
+                    for base in dataset_bases
+                    for ext in ['.jpg', '.JPG', '.Jpg', '.jpeg', '.JPEG', '.png', '.PNG', '.gif', '.tif', '.tiff']
+                    if (base / f"{image_id}{ext}").is_file()
+                ), None)
+            if image_path is None or not image_path.is_file():
+                raise FileNotFoundError(f"Image file not found for ID: {image_id}")
+            image_paths.append(image_path)
+            score_key = image_id if image_id not in similarity_json else str(image_path.resolve())
+            similarity_json[score_key] = float(score)
         
         
         if text_inputs is not None:
@@ -556,7 +547,7 @@ class MultimodalRAG:
                     },
                 ]
                 prompt = self.generator_processor.apply_chat_template(conversation, add_generation_prompt=True)
-                inputs = self.generator_processor(text=prompt, return_tensors="pt").to(self.main_device)
+                inputs = self.generator_processor(text=prompt, return_tensors="pt").to(self.generator_model.device)
             
             else:
                 images = [Image.open(image_path) for image_path in image_paths]
@@ -572,7 +563,7 @@ class MultimodalRAG:
                     },
                 ]
                 prompt = self.generator_processor.apply_chat_template(conversation, add_generation_prompt=True)
-                inputs = self.generator_processor(images=images, text=prompt, return_tensors="pt").to(self.device_map["generator"])
+                inputs = self.generator_processor(images=images, text=prompt, return_tensors="pt").to(self.generator_model.device)
             
             
             #output = self.generator_model.generate(**inputs, max_new_tokens=300,num_beams=3,do_sample=True)
@@ -588,6 +579,8 @@ class MultimodalRAG:
             return text_outputs[0]
         
         elif self.args.generator_type == "Qwen-VL-Chat":
+            from qwenvl.run_qwenvl import qwen_chat
+
             if image_paths is None:
                 question = ( 
                     f"{question}\n"
@@ -897,7 +890,7 @@ class MultimodalRAG:
         
         assert os.path.exists(watermark_path), f"Image path {watermark_path} does not exist."
         watermark = Image.open(watermark_path).convert("RGB")
-        if self.args.retriever_type == "clip":
+        if self.args.retriever_type in {"clip", "clip_finetune"}:
             inputs = self.retriever_vision_processor(images=watermark, return_tensors="pt").to(self.device_map["retriever"])
             outputs = self.retriever_vision_model(**inputs)
             image_embeds = outputs.image_embeds
@@ -913,7 +906,7 @@ class MultimodalRAG:
         )
         normalized_watermark_embedding = normalized_embedding.cpu().detach().numpy().astype("float32")
 
-        if self.args.retriever_type == "clip":
+        if self.args.retriever_type in {"clip", "clip_finetune"}:
             inputs = self.retriever_tokenizer([special_query], return_tensors="pt").to(self.device_map["retriever"])
             outputs = self.retriever_text_model(**inputs)
             text_embeds = outputs.text_embeds
@@ -960,345 +953,83 @@ class MultimodalRAG:
             probs = probs[0]
         
         elif self.args.reranker_type == "qwen":
+            from qwenvl.run_qwenvl import qwen_eval_relevance
+
             probs = qwen_eval_relevance(image_path, query, self.reranker_model, self.reranker_processor)
         return probs
     
-    def run_mmqa(self, is_images=False,is_write_file=True):
-        data_key=[
-            "special_query", 
+    def run_mmqa(self, is_images=False, is_write_file=True, watermark_num=None):
+        return self._run_queries("MMQA", is_images, is_write_file, watermark_num)
+
+    def run_webqa(self, is_images=False, is_write_file=True, watermark_num=None):
+        return self._run_queries("WebQA", is_images, is_write_file, watermark_num)
+
+    def _run_queries(self, dataset, is_images, is_write_file, watermark_num=None):
+        mode = watermark_num if watermark_num is not None else getattr(self.args, "watermark_num", "no")
+        if mode not in {"no", "single", "all"}:
+            raise ValueError(f"Unsupported watermark_num: {mode}")
+        with open(self.args.special_queries_file_path, encoding="utf-8") as handle:
+            queries = json.load(handle)
+        if not isinstance(queries, list):
+            raise ValueError("Probe-query data must be a list of records.")
+
+        database = self.images_database
+        if is_images and mode == "all":
+            database = clone_image_database(self.images_database)
+            paths = dict.fromkeys(str(Path(item["watermark_path"]).resolve()) for item in queries)
+            for path in paths:
+                self.add_watermark_to_image_database(database, path)
+
+        save_dir = Path("results") / dataset / self.args.generator_type / timestamp_str
+        if is_write_file:
+            save_dir.mkdir(parents=True, exist_ok=True)
+        response_keys = [
             "no_images_no_watermark_response",
             "yes_images_no_watermark_response",
             "yes_images_single_watermark_response",
             "yes_images_all_watermark_response",
         ]
-        results=[]
-        
-        with open(self.args.special_queries_file_path, 'r', encoding='utf-8') as f:
-            special_query_watermark_path_s = json.load(f)
-            
-        watermarked_images_database=copy.deepcopy(self.images_database)
-        for item in special_query_watermark_path_s:
-            self.add_watermark_to_image_database(
-                images_database=watermarked_images_database,
-                watermark_path=item["watermark_path"]
-            )
-        single_watermark_images_database=copy.deepcopy(self.images_database)  
-        item=special_query_watermark_path_s[0]
-        self.add_watermark_to_image_database(
-            images_database=single_watermark_images_database,
-            watermark_path=item["watermark_path"]
-        )
-        
-        save_dir=Path("results/MMQA")/self.args.generator_type/timestamp_str
-        os.makedirs(save_dir,exist_ok=True) 
-        
-        with open(self.args.special_queries_file_path, "r", encoding="utf-8") as f:
-            special_queries_watermarks = json.load(f)
-        for index, item in enumerate(tqdm(special_queries_watermarks)):
-            special_query=item["special_query"]
-            special_query_no_newline=special_query.replace('\n',' ')
-            watermark_path=item["watermark_path"]
-            
-            special_query_save_dir=Path("results/MMQA")/self.args.generator_type/timestamp_str/special_query_no_newline
-            data={key:None for key in data_key}
-            
-            #ok no_images_no_watermark_response
-            if is_images==False:
-                data['special_query']=special_query
-                output = self.generator(image_paths=None, question=special_query)
-                data['no_images_no_watermark_response']=output
-                results.append(data)
-            
-            #ok yes_images_no_watermark_response
-            elif is_images==True and self.args.watermark_num=="no":
-                
-                data['special_query']=special_query
-                
-                
-                image_paths,similarity_json= self.retriever(self.images_database,special_query)
-            
-                
-                if is_write_file:
-                    special_query_save_dir=special_query_save_dir/"yes_images_no_watermark"
-                    os.makedirs(special_query_save_dir,exist_ok=True) 
-                    images_save_dir=special_query_save_dir/"images"
-                    os.makedirs(images_save_dir, exist_ok=True)
-                    similarity_json_save_dir=special_query_save_dir
-                    
-                    for image_path in image_paths:
-                        img = Image.open(image_path)
+        response_key = f"yes_images_{mode}_watermark_response" if is_images else response_keys[0]
+        results = []
+        for query_index, item in enumerate(tqdm(queries)):
+            question = item.get("special_query", item.get("probe_query"))
+            if not isinstance(question, str) or not question.strip():
+                raise ValueError(f"Query record {query_index} requires special_query or probe_query.")
+            image_paths = None
+            similarity_json = {}
+            if is_images:
+                if mode == "single":
+                    database = clone_image_database(self.images_database)
+                    self.add_watermark_to_image_database(database, item["watermark_path"])
+                image_paths, similarity_json = self.retriever(database, question)
+                if mode == "all":
+                    similarity_json = dict(similarity_json)
+                    similarity_json["watermark"] = float(self.cal_retriever_relevance(item["watermark_path"], question))
+            with torch.no_grad():
+                output = self.generator(image_paths=image_paths, question=question)
+            result = dict.fromkeys(response_keys)
+            result["special_query"] = question
+            result[response_key] = output
+            results.append(result)
 
-                        if img.mode=='RGBA':
-                            img=img.convert('RGB')
-                            
-                        img.save(images_save_dir/f"{image_id}{image_path.suffix}") 
-                    
-                    similarity_score_file = similarity_json_save_dir/"similarity_scores.json"
-                    with open(similarity_score_file, 'w') as f:
-                        json.dump(similarity_json, f, indent=4)  
-                
-                with torch.no_grad():
-                    output = self.generator(image_paths=image_paths, question=special_query)
-                data['yes_images_no_watermark_response']=output
-                results.append(data)
-                
-            #ok yes_images_single_watermark_response
-            elif is_images==True and self.args.watermark_num=="single":
-                 
-                data['special_query']=special_query
-                
-                image_paths, similarity_json = self.retriever(single_watermark_images_database,special_query)                
-                output = self.generator(image_paths=image_paths, question=special_query)
-                
-                data['yes_images_single_watermark_response']=output
-                results.append(data)
-                
-                if is_write_file:
-                    special_query_save_dir=special_query_save_dir/"yes_images_single_watermark"
-                    os.makedirs(special_query_save_dir,exist_ok=True) 
-                    images_save_dir=special_query_save_dir/"images"
-                    os.makedirs(images_save_dir, exist_ok=True)
-                    similarity_json_save_dir=special_query_save_dir
-                    similarity_score_file = similarity_json_save_dir/ "similarity_scores.json"
-                    with open(similarity_score_file, 'w') as f:
-                        json.dump(similarity_json, f, indent=4)  
-                    
-                del output, image_paths,similarity_json
-            
-            #ok yes_images_all_watermark_response
-            elif is_images==True and self.args.watermark_num=="all":
-                
-                data['special_query']=special_query
-                
-                similarity_scores, indices_list = self.retriever(watermarked_images_database,special_query)
-                
-                retrieved_image_names = []
-                for d, j in zip(similarity_scores[0], indices_list[0]):
-                    image_id = self.images_database_index_to_image_id[str(j)]
-                    retrieved_image_names.append(image_id)
-                
-                if is_write_file:
-                    special_query_save_dir=special_query_save_dir/"yes_images_all_watermark"
-                    os.makedirs(special_query_save_dir,exist_ok=True) 
-                    images_save_dir=special_query_save_dir/"images"
-                    os.makedirs(images_save_dir, exist_ok=True)
-                    similarity_json_save_dir=special_query_save_dir
-                    similarity_score_file = similarity_json_save_dir/ "similarity_scores.json"
-                    
-                similarity_data = {}
-                image_paths = []
-                for i, image_id in enumerate(retrieved_image_names):
-                    image_path = None
-                    base_paths=[
-                        "datasets/MMQA/images",
-                        "datasets/watermark_images"
-                    ]
-                    for base_path in base_paths:
-                        for ext in ['.jpg','.jpeg','.JPG', '.png', '.PNG']:
-                            temp_path = base_path/f"{image_id}{ext}"
-                            if temp_path.exists():
-                                image_path = temp_path
-                                break  
-                    if image_path: 
-                        image_paths.append(image_path)
-                        
-                        
-                        if is_write_file:
-                            img = Image.open(image_path)
-                            
-                            if img.mode=='RGBA':
-                                img=img.convert('RGB')
-                                
-                            img.save(images_save_dir/f"{image_id}{image_path.suffix}") 
-                        
-                    else:
-                        raise FileNotFoundError(f"Image file not found for ID: {image_id}")
-                    similarity_data[image_id] = float(similarity_scores[0][i]) 
-                tmp_score=self.cal_retriever_relevance(watermark_path,special_query)
-                similarity_data["watermark"]=float(tmp_score)
-                
-                
-                if is_write_file:
-                    with open(similarity_score_file, 'w') as f:
-                        json.dump(similarity_data, f, indent=4)  
-                
-                output = self.generator(image_paths=image_paths, question=special_query)
-                data['yes_images_all_watermark_response']=output
-                results.append(data)   
+            if is_write_file and is_images:
+                query_name = question.replace("\n", " ").replace("/", "_")[:120]
+                query_dir = save_dir / f"{query_index:04d}_{query_name}" / response_key.removesuffix("_response")
+                images_dir = query_dir / "images"
+                images_dir.mkdir(parents=True, exist_ok=True)
+                for image_index, image_path in enumerate(image_paths):
+                    with Image.open(image_path) as img:
+                        if img.mode == "RGBA":
+                            img = img.convert("RGB")
+                        img.save(images_dir / f"{image_index}_{Path(image_path).name}")
+                with open(query_dir / "similarity_scores.json", "w", encoding="utf-8") as handle:
+                    json.dump(similarity_json, handle, indent=4)
         if is_write_file:
-            with open(save_dir/"results.json", 'w', encoding='utf-8') as f:
-                json.dump(results, f, indent=4, ensure_ascii=False)
+            with open(save_dir / "results.json", "w", encoding="utf-8") as handle:
+                json.dump(results, handle, indent=4, ensure_ascii=False)
         return results
-    
-    def run_webqa(self, is_images=False,is_write_file=True):
-        data_key=[
-            "special_query", 
-            "no_images_no_watermark_response",
-            "yes_images_no_watermark_response",
-            "yes_images_single_watermark_response",
-            "yes_images_all_watermark_response",
-        ]
-        results=[]
-        
-        with open(self.args.special_queries_file_path, 'r', encoding='utf-8') as f:
-            special_query_watermark_path_s = json.load(f)
-            
-        watermarked_images_database=copy.deepcopy(self.images_database)
-        for item in special_query_watermark_path_s:
-            self.add_watermark_to_image_database(
-                images_database=watermarked_images_database,
-                watermark_path=item["watermark_path"]
-            )
-        single_watermark_images_database=copy.deepcopy(self.images_database)  
-        item=special_query_watermark_path_s[0]
-        self.add_watermark_to_image_database(
-            images_database=single_watermark_images_database,
-            watermark_path=item["watermark_path"]
-        )
-        if is_write_file:
-            save_dir=Path("results/WebQA")/self.args.generator_type/timestamp_str
-            os.makedirs(save_dir,exist_ok=True) 
-        
-        with open(self.args.special_queries_file_path, "r", encoding="utf-8") as f:
-            special_queries_watermarks = json.load(f)
-        for index, item in enumerate(tqdm(special_queries_watermarks)):
-            special_query=item["special_query"]
-            special_query_no_newline=special_query.replace('\n',' ')
-            watermark_path=item["watermark_path"]
-            
-            if is_write_file:
-                special_query_save_dir=Path("results/WebQA")/self.args.generator_type/timestamp_str/special_query_no_newline
-            data={key:None for key in data_key}
-            
-            
-            
-            #ok no_images_no_watermark_response
-            if is_images==False:
-                data['special_query']=special_query
-                output = self.generator(image_paths=None, question=special_query)
-                data['no_images_no_watermark_response']=output
-                results.append(data)
-            
-            #ok yes_images_no_watermark_response
-            elif is_images==True and self.args.watermark_num=="no":
-                
-                data['special_query']=special_query
-                
-                #ok检索
-                image_paths,similarity_json= self.retriever(self.images_database,special_query)
-            
-                
-                if is_write_file:
-                    special_query_save_dir=special_query_save_dir/"yes_images_no_watermark"
-                    os.makedirs(special_query_save_dir,exist_ok=True) 
-                    images_save_dir=special_query_save_dir/"images"
-                    os.makedirs(images_save_dir, exist_ok=True)
-                    similarity_json_save_dir=special_query_save_dir
-                    
-                    for image_path in image_paths:
-                        img = Image.open(image_path)
 
-                        if img.mode=='RGBA':
-                            img=img.convert('RGB')
-                        img.save(images_save_dir/f"{image_id}{image_path.suffix}") 
-                    
-                    similarity_score_file = similarity_json_save_dir/"similarity_scores.json"
-                    with open(similarity_score_file, 'w') as f:
-                        json.dump(similarity_json, f, indent=4)  
-                
-                with torch.no_grad():
-                    output = self.generator(image_paths=image_paths, question=special_query)
-                data['yes_images_no_watermark_response']=output
-                results.append(data)
-                
-            #ok yes_images_single_watermark_response
-            elif is_images==True and self.args.watermark_num=="single":
-                 
-                data['special_query']=special_query
-                
-                image_paths, similarity_json = self.retriever(single_watermark_images_database,special_query)
-                output = self.generator(image_paths=image_paths, question=special_query)
-                
-                data['yes_images_single_watermark_response']=output
-                results.append(data)
-                
-                if is_write_file:
-                    special_query_save_dir=special_query_save_dir/"yes_images_single_watermark"
-                    os.makedirs(special_query_save_dir,exist_ok=True) 
-                    images_save_dir=special_query_save_dir/"images"
-                    os.makedirs(images_save_dir, exist_ok=True)
-                    similarity_json_save_dir=special_query_save_dir
-                    similarity_score_file = similarity_json_save_dir/ "similarity_scores.json"
-                    with open(similarity_score_file, 'w') as f:
-                        json.dump(similarity_json, f, indent=4)  
-                    
-                del output, image_paths,similarity_json
-            #ok yes_images_all_watermark_response
-            elif is_images==True and self.args.watermark_num=="all":
-                
-                data['special_query']=special_query
-                
-                similarity_scores, indices_list = self.retriever(watermarked_images_database,special_query)
-                
-                retrieved_image_names = []
-                for d, j in zip(similarity_scores[0], indices_list[0]):
-                    image_id = self.images_database_index_to_image_id[str(j)]
-                    retrieved_image_names.append(image_id)
-                
-                if is_write_file:
-                    special_query_save_dir=special_query_save_dir/"yes_images_all_watermark"
-                    os.makedirs(special_query_save_dir,exist_ok=True) 
-                    images_save_dir=special_query_save_dir/"images"
-                    os.makedirs(images_save_dir, exist_ok=True)
-                    similarity_json_save_dir=special_query_save_dir
-                    similarity_score_file = similarity_json_save_dir/ "similarity_scores.json"
-                    
-                similarity_data = {}
-                image_paths = []
-                for i, image_id in enumerate(retrieved_image_names):
-                    image_path = None
-                    base_paths=[
-                        "datasets/MMQA/images",
-                        "datasets/watermark_images"
-                    ]
-                    for base_path in base_paths:
-                        for ext in ['.jpg','.jpeg','.JPG', '.png', '.PNG']:
-                            temp_path = base_path/f"{image_id}{ext}"
-                            if temp_path.exists():
-                                image_path = temp_path
-                                break  
-                    if image_path: 
-                        image_paths.append(image_path)
-                        
-                        if is_write_file:
-                            img = Image.open(image_path)
-                            
-                            if img.mode=='RGBA':
-                                img=img.convert('RGB')
-                                
-                            img.save(images_save_dir/f"{image_id}{image_path.suffix}") 
-                        
-                    else:
-                        raise FileNotFoundError(f"Image file not found for ID: {image_id}") 
-                    similarity_data[image_id] = float(similarity_scores[0][i]) 
-                tmp_score=self.cal_retriever_relevance(watermark_path,special_query)
-                similarity_data["watermark"]=float(tmp_score)
-                
-                
-                if is_write_file:
-                    with open(similarity_score_file, 'w') as f:
-                        json.dump(similarity_data, f, indent=4)  
-                
-                output = self.generator(image_paths=image_paths, question=special_query)
-                data['yes_images_all_watermark_response']=output
-                results.append(data)   
-        if is_write_file:
-            with open(save_dir/"results.json", 'w', encoding='utf-8') as f:
-                json.dump(results, f, indent=4, ensure_ascii=False)
-        return results
-        
-    
-    
+
 def run_pipeline_logger(args):
     if args.dataset=='MMQA_sample':
         results=None

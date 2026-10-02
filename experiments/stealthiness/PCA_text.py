@@ -9,6 +9,7 @@ import pickle
 import random
 import os 
 plt.style.use('seaborn-v0_8-whitegrid')
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 seed_value = 42 
 
@@ -106,6 +107,8 @@ for source in query_sources:
     embeddings_list = all_embeddings_lists.get(source_type) 
 
    
+    if not embeddings_list:
+        continue
     embeddings_np = np.concatenate(embeddings_list, axis=0)
 
     all_embeddings_np[source_type] = embeddings_np
@@ -114,7 +117,7 @@ for source in query_sources:
 
 normal_query_type = query_sources[0]['type']
 if normal_query_type not in all_embeddings_np:
-    exit()
+    raise ValueError("Normal query embeddings are required to fit PCA")
 
 normal_embeddings_np = all_embeddings_np[normal_query_type]
 
@@ -217,4 +220,4 @@ save_path = os.path.join(output_dir, save_filename)
 ax.set_xticklabels([])
 ax.set_yticklabels([])
 ax.set_zticklabels([])
-plt.savefig(save_path, bbox_inches='tight') 
+plt.savefig(save_path, bbox_inches='tight')

@@ -5,12 +5,11 @@ import re
 import glob
 import json
 import torch
-import copy
 import argparse
-from multimodalrag import MultimodalRAG
 from tqdm import tqdm 
 import random
-from experiments.harmlessness.simscore import calculate_simscore
+from experiments.retrieval_data import normalized_image_path
+from utils.index_metadata import clone_image_database
 seed_value = 42 
 
 random.seed(seed_value) 
@@ -31,7 +30,7 @@ def retrieve_rank(watermarkedmmrag):
         with open(json_path, 'r', encoding='utf-8') as f:
             json_data = json.load(f)
     elif watermarkedmmrag.args.relevant_query_type=='spatial':
-        json_dir="datasets/relavent_query/diffusion"
+        json_dir="datasets/relavent_query/spatial"
         json_pattern = os.path.join(json_dir, '*.json')
         json_files = glob.glob(json_pattern)
         json_data=[]
@@ -56,22 +55,29 @@ def retrieve_rank(watermarkedmmrag):
     with open(filename, 'w', encoding='utf-8') as file_object:
         for item in tqdm(json_data,""):
             all_query_times+=1
-            tmp_database=copy.deepcopy(watermarkedmmrag.images_database)
+            tmp_database=clone_image_database(watermarkedmmrag.images_database)
             watermarkedmmrag.add_watermark_to_image_database(tmp_database,item["watermark_path"])
-            image_paths,similarity_json=watermarkedmmrag.retriever(tmp_database,item["probe_query"])
-            absolute_str_image_paths = [str(p.resolve()) for p in image_paths]
-            if item["watermark_path"] in absolute_str_image_paths:
-                watermark_rank=absolute_str_image_paths.index(item["watermark_path"])+1
+            question = item.get("probe_query", item.get("special_query"))
+            if not isinstance(question, str) or not question.strip():
+                raise ValueError("Each relevant-query record needs 'probe_query' or 'special_query'.")
+            image_paths,similarity_json=watermarkedmmrag.retriever(tmp_database,question)
+            absolute_image_paths = [normalized_image_path(p) for p in image_paths]
+            watermark_path = normalized_image_path(item["watermark_path"])
+            if watermark_path in absolute_image_paths:
+                watermark_rank=absolute_image_paths.index(watermark_path)+1
                 watermark_rank_sum+=watermark_rank
                 file_object.write(str(watermark_rank) + '\n')
                 print("watermark_rank:",watermark_rank)
             else:
                 watermark_rank_sum+=watermarkedmmrag.args.clip_topk
+    if not all_query_times:
+        raise ValueError("No relevant query records found.")
     return float(watermark_rank_sum/all_query_times)
 
 
 
-def sim_score(watermarkedmmrag:MultimodalRAG):
+def sim_score(watermarkedmmrag):
+    from experiments.harmlessness.simscore import calculate_simscore
     
     if watermarkedmmrag.args.dataset=='MMQA': 
         data:list[dict[str,str]]=[]
@@ -100,7 +106,7 @@ def sim_score(watermarkedmmrag:MultimodalRAG):
             
             question=item["probe_query"]
             
-            tmp_database=copy.deepcopy(watermarkedmmrag.images_database)
+            tmp_database=clone_image_database(watermarkedmmrag.images_database)
             clean_image_paths,_=watermarkedmmrag.retriever(tmp_database,question)
             clean_answer=watermarkedmmrag.generator(clean_image_paths,question)
             
@@ -146,6 +152,7 @@ if __name__ == "__main__":
                                                                                     "InternVL3-8B"])
     parser.add_argument("--relevant_query_type", type=str, default="acronym_replace", choices=["acronym_replace","acronym_no_instruction", "spatial", "adv"])
     args = parser.parse_args()
+    from multimodalrag import MultimodalRAG
 
     watermarkedmmrag=MultimodalRAG(args)
     r=retrieve_rank(watermarkedmmrag)

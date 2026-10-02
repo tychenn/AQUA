@@ -35,6 +35,8 @@ conda env create -f environment.yml
 conda activate AQUA
 ```
 
+The default environment uses Transformers 4.51.3. Qwen3-VL is loaded only when selected and requires a newer Transformers version with `Qwen3VLForConditionalGeneration`, such as 4.57.1.
+
 ## 3. Required External Assets
 
 This repository intentionally excludes large assets (raw datasets and model checkpoints).
@@ -119,6 +121,8 @@ python -m utils.indexing_faiss --datasets WebQA --clip_type hf_clip
 python -m utils.indexing_faiss --datasets MMQA_ratio --clip_type hf_clip
 ```
 
+The MMQA command also writes `MMQA_all_hf_clip.index`, which is the core pipeline's default index. Both commands create output directories and write the corresponding image-ID mappings.
+
 ## 6. Run Core Pipeline Smoke Test
 
 ```bash
@@ -185,8 +189,12 @@ python -m experiments.robustness.table \
 python -m experiments.stealthiness.calculate_retrieval_ratio \
   --dataset WebQA \
   --retriever_type clip \
-  --generator_type None
+  --generator_type None \
+  --watermark_type acronym \
+  --normal_queries_path datasets/WebQA/jsons/WebQA_train_val.json
 ```
+
+Normal-query and stealthiness experiments accept `--normal_queries_path` for question data. WebQA input can be a list of records with `question` fields or a dictionary keyed by question ID with `Q` fields. The image-index mapping file is used only to resolve retrieved images. The normal-query watermark retrieval rate is the fraction of queries retrieving at least one injected watermark.
 
 ## 8. Common Issues
 

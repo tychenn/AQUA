@@ -1,30 +1,18 @@
 import argparse
 import json
-import os
 from tqdm import tqdm
 from pathlib import Path
 import torch
-from multimodalrag import MultimodalRAG
-from experiments.effectiveness.pvalue import contains_ignoring_case_punctuation_space
+from experiments.retrieval_data import (
+    IMAGE_SUFFIXES,
+    load_query_records,
+    normalized_image_path,
+    watermark_image_directory,
+)
 
-NORMAL_QUERY_JSON_PATHS = {
-    "MMQA": Path("datasets/MMQA/jsons/MMQA_all_image.json"),
-}
 
-
-def load_normal_queries(dataset, max_examples=None):
-    dataset_key = dataset.upper()
-    json_path = NORMAL_QUERY_JSON_PATHS.get(dataset_key)
-    if json_path is None:
-        raise ValueError(f"Normal queries are not configured for dataset '{dataset}'.")
-    if not json_path.exists():
-        raise FileNotFoundError(f"Normal query file not found: {json_path}")
-    with open(json_path, 'r', encoding='utf-8') as f:
-        queries = json.load(f)
-    if max_examples is not None and max_examples > 0:
-        queries = queries[:max_examples]
-    print(f"Loaded {len(queries)} normal queries from {json_path}.")
-    return queries
+def load_normal_queries(dataset, max_examples=None, json_path=None):
+    return load_query_records(dataset, json_path, max_examples)
 
 
 def get_normal_query_output_dir(args):
@@ -50,35 +38,30 @@ def _extract_answer_texts(example):
     return answer_texts
 
 def add_watermarks(mmRAG):
-    if mmRAG.args.watermark_type=='acronym':
-        watermarks_dir="datasets/watermark_images/acronym"
-    elif mmRAG.args.watermark_type=='spatial':
-        watermarks_dir="datasets/watermark_images/spatial"
-    elif mmRAG.args.watermark_type=='opt':
-        if mmRAG.args.generator_type in ["LLaVA", "TinyLLaVA-3.1B"]:
-            watermarks_dir="datasets/watermark_images/opt/llava"
-        elif mmRAG.args.generator_type=="Qwen-VL-Chat":
-            watermarks_dir="datasets/watermark_images/opt/qwen" 
-        elif mmRAG.args.generator_type=="InternVL3-2B":
-            watermarks_dir="datasets/watermark_images/opt/intern"
-        elif mmRAG.args.generator_type in ["Qwen2.5-VL-7B-Instruct","Qwen3-VL-32B-Instruct","qwen2.5-vl-finetune"]:
-            watermarks_dir="datasets/watermark_images/opt/qwen25"  
-    elif mmRAG.args.watermark_type=='naive':
-        watermarks_dir="datasets/watermark_images/naive"
-    else:
-        print("error")
-    watermarks_dir="datasets/watermark_images/acronym"# You need to complement the path
-    watermark_paths=os.listdir(watermarks_dir)
-    for watermark_file_name in watermark_paths:
-        watermark_path = os.path.join(watermarks_dir, watermark_file_name)
-        mmRAG.add_watermark_to_image_database(mmRAG.images_database,watermark_path)
+    watermarks_dir = watermark_image_directory(mmRAG.args)
+    watermark_paths = sorted(
+        path for path in watermarks_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
+    )
+    if not watermark_paths:
+        raise ValueError(f"No watermark images found in {watermarks_dir}.")
+    injected_paths = set(getattr(mmRAG, "injected_watermark_paths", ()))
+    for watermark_path in watermark_paths:
+        mmRAG.add_watermark_to_image_database(mmRAG.images_database, str(watermark_path))
+        injected_paths.add(normalized_image_path(watermark_path))
+    mmRAG.injected_watermark_paths = injected_paths
+    return injected_paths
         
         
 def cal_retrieved_watermark_ratio(mmRAG, normal_queries):
+    """Fraction of valid queries retrieving at least one injected watermark."""
     if not normal_queries:
         print("No normal queries available for watermark retrieval calculation.")
         return 0.0
-    watermarks_dir=Path("datasets/watermark_images")
+    injected_paths = getattr(mmRAG, "injected_watermark_paths", None)
+    if injected_paths is None:
+        raise ValueError("Call add_watermarks before measuring watermark retrieval.")
+    injected_paths = {normalized_image_path(path) for path in injected_paths}
     retrieved_watermark_num=0
     processed_queries=0
     for item in tqdm(normal_queries, desc="Processing questions"):
@@ -89,11 +72,8 @@ def cal_retrieved_watermark_ratio(mmRAG, normal_queries):
         with torch.no_grad():
             image_paths,_=mmRAG.retriever(mmRAG.images_database,question)
         
-        for image_path in image_paths:
-            image_name=image_path.name
-            test_path=watermarks_dir/image_name
-            if test_path.exists():
-                retrieved_watermark_num+=1
+        if any(normalized_image_path(path) in injected_paths for path in image_paths):
+            retrieved_watermark_num += 1
         
     ratio=retrieved_watermark_num/processed_queries if processed_queries else 0.0
     print("Retrieved watermark ratio:",ratio)
@@ -105,6 +85,8 @@ def cal_retrieved_watermark_ratio(mmRAG, normal_queries):
 
 
 def evaluate_normal_query_accuracy(mmRAG, normal_queries):
+    from experiments.effectiveness.pvalue import contains_ignoring_case_punctuation_space
+
     if not normal_queries:
         print("No normal queries available for accuracy evaluation.")
         return 0.0
@@ -148,7 +130,8 @@ def evaluate_normal_query_accuracy(mmRAG, normal_queries):
         
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", type=str, default="MMQA", choices=["MMQA","WEBQA"])
+    parser.add_argument("--dataset", type=lambda value: "WebQA" if value.upper() == "WEBQA" else value.upper(),
+                        default="MMQA", choices=["MMQA", "WebQA"])
     parser.add_argument("--retriever_type", type=str, default="clip", choices=["clip","siglip-so400m-patch14-384"])
     parser.add_argument("--clip_topk", type=int, default=5)
     parser.add_argument("--index_path", type=str, default=None)
@@ -169,12 +152,15 @@ if __name__ == "__main__":
     parser.add_argument("--experiment_time", type=int, default=1)
     parser.add_argument("--watermark_type", type=str, default="acronym", choices=["acronym", "spatial", "opt", "naive"])
     parser.add_argument("--max_normal_queries", type=int, default=None)
+    parser.add_argument("--normal_queries_path", type=str, default=None)
     args = parser.parse_args()
+    from multimodalrag import MultimodalRAG
+
     watermarked_mmRAG=MultimodalRAG(args)
     print("",watermarked_mmRAG.images_database.ntotal)
     
     add_watermarks(watermarked_mmRAG)
     print("",watermarked_mmRAG.images_database.ntotal)
-    normal_queries=load_normal_queries(args.dataset, args.max_normal_queries)
+    normal_queries=load_normal_queries(args.dataset, args.max_normal_queries, args.normal_queries_path)
     cal_retrieved_watermark_ratio(watermarked_mmRAG, normal_queries)
     evaluate_normal_query_accuracy(watermarked_mmRAG, normal_queries)

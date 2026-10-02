@@ -3,11 +3,11 @@ import os
 import numpy as np
 import json
 import torch
-import copy
+from utils.index_metadata import clone_image_database
 import argparse
 import random
 from multimodalrag import MultimodalRAG
-from experiments.effectiveness.pvalue import contains_ignoring_case_punctuation_space
+from experiments.effectiveness.pvalue import contains_ignoring_case_punctuation_space, probe_directory
 from tqdm import tqdm 
 seed_value = 42 
 
@@ -19,18 +19,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(seed_value)
     
 def calculate_fpr(watermarkedmmrag):
-    if watermarkedmmrag.args.watermark_type=='acronym':
-        print("Experiment of acronym fpr")
-        directory_path="datasets/probe_query/acronym"
-    elif watermarkedmmrag.args.watermark_type=='spatial':
-        print("Experiment of spatial fpr")
-        directory_path="datasets/probe_query/spatial"
-    elif watermarkedmmrag.args.watermark_type=='opt':
-        print("Experiment of opt llava fpr")
-        directory_path="datasets/probe_query/opt/llava"
-    elif watermarkedmmrag.args.watermark_type=='naive':
-        print("Experiment of naive fpr")
-        directory_path="datasets/probe_query/naive"
+    directory_path = probe_directory(watermarkedmmrag.args)
     inject_num_list=[1,50,100,500,1000]
     FPRs=[]
     all_querys=[]
@@ -60,18 +49,7 @@ def calculate_fpr(watermarkedmmrag):
     print(f"FPRs:{FPRs}")
     
 def calculate_tpr(watermarkedmmrag):
-    if watermarkedmmrag.args.watermark_type=='acronym':
-        print("Experiment of acronym fpr")
-        directory_path="datasets/probe_query/acronym"
-    elif watermarkedmmrag.args.watermark_type=='spatial':
-        print("Experiment of spatial fpr")
-        directory_path="datasets/probe_query/spatial"
-    elif watermarkedmmrag.args.watermark_type=='opt':
-        print("Experiment of opt llava fpr")
-        directory_path="datasets/probe_query/opt/llava"
-    elif watermarkedmmrag.args.watermark_type=='naive':
-        print("Experiment of naive fpr")
-        directory_path="datasets/probe_query/naive"
+    directory_path = probe_directory(watermarkedmmrag.args)
     inject_num_list=[1,50,100,500,1000]
     TPRs=[]
     all_querys=[]
@@ -87,7 +65,7 @@ def calculate_tpr(watermarkedmmrag):
         all_query_num=0
         for item in tqdm(items,"special qeury们"):
             all_query_num+=1
-            tmp_database=copy.deepcopy(watermarkedmmrag.images_database)
+            tmp_database=clone_image_database(watermarkedmmrag.images_database)
             for _ in range(inject_num):
                 watermarkedmmrag.add_watermark_to_image_database(tmp_database,item['watermark_path'])
             image_paths,_=watermarkedmmrag.retriever(tmp_database,item["probe_query"])

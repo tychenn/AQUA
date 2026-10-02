@@ -18,7 +18,7 @@ from transformers.generation.logits_process import LogitsProcessorList
 
 if TYPE_CHECKING:
     from transformers.generation.streamers import BaseStreamer
-from transformers.generation.utils import GenerateOutput
+from transformers.generation.utils import GenerateOutput, GenerationMixin
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
     CausalLMOutputWithPast,
@@ -500,6 +500,7 @@ class QWenModel(QWenPreTrainedModel):
             eps=config.layer_norm_epsilon,
         )
         self.visual = VisionTransformer(**config.visual)
+        self.cur_image_tensor = None
 
         self.post_init()
 
@@ -742,9 +743,14 @@ class QWenModel(QWenPreTrainedModel):
         )
 
 
-class QWenLMHeadModel(QWenPreTrainedModel):
+class QWenLMHeadModel(QWenPreTrainedModel, GenerationMixin):
     _keys_to_ignore_on_load_missing = [r"h\.\d+\.attn\.rotary_emb\.inv_freq"]
     _keys_to_ignore_on_load_unexpected = [r"h\.\d+\.attn\.masked_bias"]
+
+    @classmethod
+    def _supports_default_dynamic_cache(cls):
+        # This model's forward method consumes the legacy tuple cache.
+        return False
 
     def __init__(self, config):
         super().__init__(config)

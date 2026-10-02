@@ -96,10 +96,11 @@ def load_clip(args):
         tokenizer = processor
     else:
         raise ValueError("clip_type not supported")
+    model.eval()
     return model, preprocess, tokenizer
 
 def build_MMQA_embeddings(clip_type='hf_clip'):
-    model, preprocess, tokenizer = load_clip(args)
+    model, preprocess, tokenizer = load_clip(argparse.Namespace(clip_type=clip_type))
     images_dir="datasets/MMQA/images"
     embeddings = []
     index_to_image_id = {}
@@ -124,7 +125,7 @@ def build_MMQA_embeddings(clip_type='hf_clip'):
                 if image.size[0]==1:
                     image = image.resize((10, image.size[1]))
                 elif image.size[1]==1:
-                    image = image.resize((image.size[1],10))
+                    image = image.resize((image.size[0],10))
                 inputs = preprocess(
                     images=image,
                     return_tensors="pt"
@@ -151,9 +152,11 @@ def build_MMQA_embeddings(clip_type='hf_clip'):
 
 
     embeddings_path="datasets/MMQA/faiss_index/embeddings.pkl"
+    Path(embeddings_path).parent.mkdir(parents=True, exist_ok=True)
     with open(embeddings_path, 'wb') as f:
         pickle.dump(embeddings, f)
     json_filepath = "datasets/MMQA/jsons/WatermarkMMRAG/MMQA_all_index_to_image_id.json"
+    Path(json_filepath).parent.mkdir(parents=True, exist_ok=True)
     with open(json_filepath,"w") as f:
         json.dump(index_to_image_id,f,indent=4)
     return index_to_image_id
@@ -161,7 +164,7 @@ def build_MMQA_embeddings(clip_type='hf_clip'):
 def build_WebQA_embeddings(clip_type='hf_clip'):
     
         
-    model, preprocess, tokenizer = load_clip(args)
+    model, preprocess, tokenizer = load_clip(argparse.Namespace(clip_type=clip_type))
     images_dir="datasets/WebQA/images"
     embeddings = []
     index_to_image_id = {}
@@ -186,7 +189,7 @@ def build_WebQA_embeddings(clip_type='hf_clip'):
                 if image.size[0]==1:
                     image = image.resize((10, image.size[1]))
                 elif image.size[1]==1:
-                    image = image.resize((image.size[1],10))
+                    image = image.resize((image.size[0],10))
                 inputs = preprocess(
                     images=image,
                     return_tensors="pt"
@@ -213,9 +216,11 @@ def build_WebQA_embeddings(clip_type='hf_clip'):
 
        
     embeddings_path="datasets/WebQA/faiss_index/embeddings.pkl"
+    Path(embeddings_path).parent.mkdir(parents=True, exist_ok=True)
     with open(embeddings_path, 'wb') as f:
         pickle.dump(embeddings, f)
     json_filepath = "datasets/WebQA/jsons/WebQA_all_index_to_image_id.json"
+    Path(json_filepath).parent.mkdir(parents=True, exist_ok=True)
     with open(json_filepath,"w") as f:
         json.dump(index_to_image_id,f,indent=4)
     return index_to_image_id
@@ -224,12 +229,16 @@ def ratio_embeddings_to_faiss(
     embeddings_path="datasets/MMQA/faiss_index/embeddings.pkl",
     ratio=None
 ):
-    assert ratio
+    if ratio is None or not 0 < ratio <= 1:
+        raise ValueError("ratio must be greater than 0 and at most 1")
     with open(embeddings_path, 'rb') as f:
         embeddings=pickle.load(f)
     total_images_num=len(embeddings)
+    if total_images_num == 0:
+        raise ValueError("Cannot build a FAISS index from an empty embedding cache")
     
-    embeddings = np.vstack(embeddings[:int(ratio*total_images_num)]).astype("float32")
+    sample_count = max(1, int(ratio * total_images_num))
+    embeddings = np.vstack(embeddings[:sample_count]).astype("float32")
 
     index = faiss.IndexFlatIP(embeddings.shape[1])
     index.add(embeddings)
@@ -292,33 +301,53 @@ def build_faiss_mmqa(
     return index, index_to_image_id
 
 
+def build_ratio_indices(dataset, clip_type="hf_clip"):
+    root = Path("datasets") / dataset
+    embeddings_path = root / "faiss_index" / "embeddings.pkl"
+    mapping_path = root / "jsons" / f"{dataset}_all_index_to_image_id.json"
+    if dataset == "MMQA":
+        mapping_path = root / "jsons" / "WatermarkMMRAG" / mapping_path.name
+        build_embeddings = build_MMQA_embeddings
+        filename_prefix = "MMQA_ratio"
+    elif dataset == "WebQA":
+        build_embeddings = build_WebQA_embeddings
+        filename_prefix = "WebQA"
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset}")
+
+    if not (embeddings_path.exists() and mapping_path.exists()):
+        build_embeddings(clip_type=clip_type)
+    with mapping_path.open() as f:
+        index_to_image_id = json.load(f)
+
+    index_dir = root / "faiss_index"
+    index_dir.mkdir(parents=True, exist_ok=True)
+    for ratio in (0.2, 0.4, 0.6, 0.8, 1.0):
+        print(f"Start to save {ratio=}")
+        index = ratio_embeddings_to_faiss(embeddings_path=embeddings_path, ratio=ratio)
+        ratio_mapping = {str(i): index_to_image_id[str(i)] for i in range(index.ntotal)}
+        faiss.write_index(index, str(index_dir / f"{filename_prefix}_{clip_type}_{ratio:.0%}.index"))
+        ratio_mapping_path = root / "jsons" / f"{dataset}_all_index_to_image_id_{ratio:.0%}.json"
+        ratio_mapping_path.parent.mkdir(parents=True, exist_ok=True)
+        with ratio_mapping_path.open("w") as f:
+            json.dump(ratio_mapping, f, indent=4)
+        if dataset == "MMQA" and ratio == 1.0:
+            faiss.write_index(index, str(index_dir / f"MMQA_all_{clip_type}.index"))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--topk", type=int, default=20)
-    parser.add_argument("--datasets", type=str, default="WebQA")
+    parser.add_argument("--datasets", type=str, default="WebQA", choices=["WebQA", "MMQA", "MMQA_ratio"])
     parser.add_argument("--clip_type", type=str, default="hf_clip")
     args = parser.parse_args()
 
-    model, preprocess, tokenizer = load_clip(args)
-
-    if args.datasets == "WebQA":
-        if not (os.path.exists("datasets/WebQA/faiss_index/embeddings.pkl") and 
-                os.path.exists("datasets/WebQA/jsons/WebQA_all_index_to_image_id.json")):
-            build_WebQA_embeddings(clip_type=args.clip_type)
-        ratios = np.arange(0.2, 1.2, 0.2)
-        for ratio in ratios:  
-            print(f"Start to save {ratio=}")
-            index=ratio_embeddings_to_faiss(embeddings_path="datasets/WebQA/faiss_index/embeddings.pkl",
-                                            ratio=ratio)
-            abs_dir_path="datasets/WebQA/faiss_index"
-            faiss.write_index(
-                index,
-                f"{abs_dir_path}/{args.datasets}_{args.clip_type}_{ratio:.0%}.index"
-            )
-            
-            json_filepath = f"datasets/WebQA/jsons/WebQA_all_index_to_image_id_{ratio:.0%}.json"
+    if args.datasets in ("WebQA", "MMQA_ratio"):
+        dataset = "MMQA" if args.datasets == "MMQA_ratio" else args.datasets
+        build_ratio_indices(dataset, clip_type=args.clip_type)
     #ok deprecated
     elif args.datasets == "MMQA":
+        model, preprocess, tokenizer = load_clip(args)
 
         with open("datasets/MMQA/jsons/MM_PoisonRAG/MMQA_test_image.json", "r") as f:
             val_dataset = json.load(f)
@@ -334,21 +363,3 @@ if __name__ == "__main__":
             clip_type=args.clip_type,
             preprocess=preprocess,
         )
-        
-
-    #ok here is MMQA
-    elif args.datasets=="MMQA_ratio":
-        if not os.path.exists("datasets/MMQA/faiss_index/embeddings.pkl"):
-            build_MMQA_embeddings(clip_type=args.clip_type)
-        ratios = np.arange(0.2, 1.2, 0.2)
-        for ratio in ratios:  
-            print(f"Start to save {ratio=}")
-            index=ratio_embeddings_to_faiss(ratio=ratio)
-            abs_dir_path="datasets/MMQA/faiss_index"
-            faiss.write_index(
-                index,
-                f"{abs_dir_path}/{args.datasets}_{args.clip_type}_{ratio:.0%}.index"
-            )
-            
-            json_filepath = f"datasets/MMQA/jsons/MMQA_all_index_to_image_id_{ratio:.0%}.json"
-    

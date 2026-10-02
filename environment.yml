@@ -98,7 +98,6 @@ dependencies:
       - einops==0.6.1
       - einops-exts==0.0.4
       - embedding-reader==1.7.0
-      - en-core-web-sm==3.7.1
       - executing==2.2.0
       - exifread-nocycle==3.0.1
       - faiss-gpu==1.7.2

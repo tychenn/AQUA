@@ -63,7 +63,7 @@ def calculate_tpr(watermarkedmmrag):
     for i,inject_num in enumerate(inject_num_list):
         TPR=0
         all_query_num=0
-        for item in tqdm(items,"special qeury们"):
+        for item in tqdm(items, "special queries"):
             all_query_num+=1
             tmp_database=clone_image_database(watermarkedmmrag.images_database)
             for _ in range(inject_num):

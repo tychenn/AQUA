@@ -302,7 +302,7 @@ class MultimodalRAG:
             model_name="models/Qwen2.5-VL-32B-Instruct"
             quantization_config = BitsAndBytesConfig(
                 load_in_8bit=True,
-                # bnb_4bit_compute_dtype=torch.float16, # 移除 4bit 相关的参数
+                # bnb_4bit_compute_dtype=torch.float16, # removed 4-bit related parameters
                 # bnb_4bit_quant_type="nf4",
                 # bnb_4bit_use_double_quant=True,
             )

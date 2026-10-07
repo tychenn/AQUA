@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use AQUA in your research, please cite the paper below."
+title: "AQUA: Safeguarding Multimodal Knowledge Copyright in the RAG-as-a-Service Environment"
+authors:
+  - family-names: Chen
+    given-names: Tianyu
+  - family-names: Lou
+    given-names: Jian
+  - family-names: Wang
+    given-names: Wenjie
+repository-code: "https://github.com/tychenn/AQUA"
+url: "https://arxiv.org/abs/2506.10030"
+preferred-citation:
+  type: article
+  title: "Safeguarding Multimodal Knowledge Copyright in the RAG-as-a-Service Environment"
+  authors:
+    - family-names: Chen
+      given-names: Tianyu
+    - family-names: Lou
+      given-names: Jian
+    - family-names: Wang
+      given-names: Wenjie
+  year: 2025
+  journal: arXiv
+  doi: "10.48550/arXiv.2506.10030"
+  url: "https://arxiv.org/abs/2506.10030"

@@ -1,0 +1,5 @@
+Tongyi Qianwen is licensed under the Tongyi Qianwen LICENSE AGREEMENT, Copyright (c) Alibaba Cloud. All Rights Reserved.
+
+Upstream: https://github.com/QwenLM/Qwen-VL
+
+The Qwen-VL-Chat code in this directory is adapted for AQUA. Local changes include Transformers generation compatibility and image-input handling.

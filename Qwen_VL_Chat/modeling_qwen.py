@@ -1,7 +1,8 @@
 # Copyright (c) Alibaba Cloud.
 #
 # This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
+# LICENSE file in this directory.
+# Adapted for AQUA; see NOTICE for attribution and modification details.
 
 import importlib
 import math
@@ -57,14 +58,11 @@ QWen_PRETRAINED_MODEL_ARCHIVE_LIST = ["qwen-7b"]
 _ERROR_BAD_CHAT_FORMAT = """\
 We detect you are probably using the pretrained model (rather than chat model) for chatting, since the chat_format in generation_config is not "chatml".
 If you are directly using the model downloaded from Huggingface, please make sure you are using our "Qwen/Qwen-7B-Chat" Huggingface model (rather than "Qwen/Qwen-7B") when you call model.chat().
-我们检测到您可能在使用预训练模型（而非chat模型）进行多轮chat，因为您当前在generation_config指定的chat_format，并未设置为我们在对话中所支持的"chatml"格式。
-如果您在直接使用我们从Huggingface提供的模型，请确保您在调用model.chat()时，使用的是"Qwen/Qwen-7B-Chat"模型（而非"Qwen/Qwen-7B"预训练模型）。
 """
 
 _SENTINEL = object()
 _ERROR_STREAM_IN_CHAT = """\
 Pass argument `stream` to model.chat() is buggy, deprecated, and marked for removal. Please use model.chat_stream(...) instead of model.chat(..., stream=True).
-向model.chat()传入参数stream的用法可能存在Bug，该用法已被废弃，将在未来被移除。请使用model.chat_stream(...)代替model.chat(..., stream=True)。
 """
 
 apply_rotary_emb_func = None

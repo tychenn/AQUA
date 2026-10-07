@@ -8,31 +8,23 @@
 
 [![Paper](https://img.shields.io/badge/Paper-arXiv%3A2506.10030-b31b1b)](https://arxiv.org/abs/2506.10030)
 [![Python](https://img.shields.io/badge/Python-3.10-blue)](environment.yml)
-[![Tests](https://github.com/tychenn/AQUA/actions/workflows/tests.yml/badge.svg)](https://github.com/tychenn/AQUA/actions/workflows/tests.yml)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-[Overview](#overview) · [Installation](#installation) · [Quick start](#quick-start) · [Experiments](#experiments) · [Data guide](docs/DATA.md) · [Citation](#citation)
+[Method](#method) · [Setup](#setup) · [Run AQUA](#run-aqua) · [Experiments](#experiments) · [Citation](#citation)
 
 </div>
 
-## Overview
+## Method
 
-AQUA protects image knowledge in multimodal retrieval-augmented generation (RAG) through semantic watermarks. It encodes acronym triggers and spatial relationships in watermark images, then verifies ownership through the text returned for corresponding probe queries. See the [paper](https://arxiv.org/abs/2506.10030) for the method and evaluation.
+AQUA protects image knowledge in multimodal retrieval-augmented generation (RAG) through semantic watermarks. It encodes acronym triggers and spatial relationships in watermark images, then verifies ownership through the text returned for corresponding probe queries.
 
-```mermaid
-flowchart LR
-    A[Watermark images] --> B[Image knowledge base]
-    C[Probe queries] --> D[Image retriever]
-    B --> D
-    D --> E[Multimodal generator]
-    E --> F[Response matching and statistical verification]
-```
+![AQUA watermark injection and verification](assets/method.png)
 
-The implementation includes MMQA and WebQA retrieval pipelines, CLIP and SigLIP retrievers, multimodal generators, and experiments for effectiveness, harmlessness, robustness, and stealthiness.
+*Watermark injection and verification, Figure 3 of the [paper](https://arxiv.org/html/2506.10030v2#S4.F3).*
 
-## Installation
+## Setup
 
-Create the Python 3.10 environment on Linux:
+Run commands from the repository root. Create the Python 3.10 environment on Linux:
 
 ```bash
 git clone https://github.com/tychenn/AQUA.git
@@ -41,15 +33,11 @@ conda env create -f environment.yml
 conda activate AQUA
 ```
 
-The environment pins Transformers 4.51.3 for the default Qwen2.5-VL configuration. The optional Qwen3-VL generator uses Transformers 4.57.1 or another version providing `Qwen3VLForConditionalGeneration`.
+The default configuration uses CLIP and Qwen2.5-VL with Transformers 4.51.3. The optional Qwen3-VL generator uses Transformers 4.57.1 or another version providing `Qwen3VLForConditionalGeneration`.
 
-## Quick start
+### Models
 
-Run commands from the repository root. Prepare images and query records using the [data guide](docs/DATA.md).
-
-### 1. Download models
-
-The default pipeline uses [CLIP ViT-L/14@336px](https://huggingface.co/openai/clip-vit-large-patch14-336) and [Qwen2.5-VL-7B-Instruct](https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct). Download them to the paths used by the code:
+Download [CLIP ViT-L/14@336px](https://huggingface.co/openai/clip-vit-large-patch14-336) and [Qwen2.5-VL-7B-Instruct](https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct):
 
 ```bash
 python - <<'PY'
@@ -66,9 +54,30 @@ snapshot_download(
 PY
 ```
 
-### 2. Build an image index
+### Data
 
-Store MMQA images in `datasets/MMQA/images/` and WebQA images in `datasets/WebQA/images/`.
+| Dataset | Source | Images | Normal queries |
+| --- | --- | --- | --- |
+| MMQA | [MultiModalQA](https://github.com/allenai/multimodalqa) | `datasets/MMQA/images/` | `datasets/MMQA/jsons/MMQA_all_image.json` |
+| WebQA | [WebQA](https://github.com/WebQnA/WebQA#download-data) | `datasets/WebQA/images/` | `datasets/WebQA/jsons/WebQA_train_val.json` |
+
+Name image files by their image IDs, retaining the file extension. For MMQA, use the upstream image metadata to map source filenames to IDs, and save image-question records as a JSON list with `question`, `answers`, and `metadata.image_doc_ids`. WebQA accepts its question-ID dictionary with `Q`, `A`, and `img_posFacts` fields. Use `--normal_queries_path` to select a question file.
+
+Place watermark images in `datasets/watermark_images/acronym/` or `datasets/watermark_images/spatial/`, and probe-query JSON files in the matching directory under `datasets/probe_query/`:
+
+```json
+[
+  {
+    "watermark_path": "datasets/watermark_images/acronym/BJT.png",
+    "gt": "Bai Jing Ting",
+    "probe_query": "Who is BJT? Answer the name related to BJT."
+  }
+]
+```
+
+`watermark_path` identifies the image to inject, `gt` is the expected response, and `probe_query` is the verification question. Image paths resolve from the repository root.
+
+### Image indices
 
 ```bash
 # MMQA
@@ -78,9 +87,11 @@ python -m utils.indexing_faiss --datasets MMQA_ratio --clip_type hf_clip
 python -m utils.indexing_faiss --datasets WebQA --clip_type hf_clip
 ```
 
-Each command writes FAISS indices and image-ID mappings. The MMQA command produces `datasets/MMQA/faiss_index/MMQA_all_hf_clip.index`; the WebQA default is `datasets/WebQA/faiss_index/WebQA_hf_clip_100%.index`. Custom indices can be selected with `--index_path` and `--index_mapping_path`.
+The commands create FAISS indices and image-ID mappings. The default indices are `datasets/MMQA/faiss_index/MMQA_all_hf_clip.index` and `datasets/WebQA/faiss_index/WebQA_hf_clip_100%.index`. Select another index and its matching mapping with `--index_path` and `--index_mapping_path`.
 
-### 3. Run retrieval and generation
+## Run AQUA
+
+Retrieve images and generate an answer with the default pipeline:
 
 ```bash
 python multimodalrag.py \
@@ -93,15 +104,13 @@ python multimodalrag.py \
   --generator_device cuda:0
 ```
 
-This command retrieves images for a question and prints the generated answer.
-
 ## Experiments
 
-Configure watermark images and probe-query JSON files as described in the [data guide](docs/DATA.md#watermarks-and-probe-queries). The following commands use GPU 0 for retrieval and generation.
+The following commands use GPU 0 for retrieval and generation. Set `--watermark_type spatial` to evaluate spatial watermarks.
 
 ### Effectiveness
 
-Measure watermark retrieval rank, conditional generation success rate (CGSR), and statistical significance:
+Measure retrieval rank, conditional generation success rate (CGSR), and statistical significance:
 
 ```bash
 for metric in rank CGSR pvalue; do
@@ -115,7 +124,7 @@ for metric in rank CGSR pvalue; do
 done
 ```
 
-The p-value script accepts `--query_times` to set the total number of paired probes. Each pair evaluates the query against a clean index and an index containing its watermark. Results include processed query counts and per-batch success rates under `results/effectiveness/pvalue/`.
+The p-value script accepts `--query_times` to set the total number of paired probes. Each pair evaluates a query against clean and watermarked indices. Results are written under `results/effectiveness/pvalue/`.
 
 ### Harmlessness
 
@@ -124,7 +133,6 @@ Evaluate normal-query watermark retrieval and answer accuracy:
 ```bash
 python -m experiments.harmlessness.normal_query \
   --dataset MMQA \
-  --retriever_type clip \
   --generator_type Qwen2.5-VL-7B-Instruct \
   --watermark_type acronym \
   --normal_queries_path datasets/MMQA/jsons/MMQA_all_image.json \
@@ -132,23 +140,20 @@ python -m experiments.harmlessness.normal_query \
   --generator_device cuda:0
 ```
 
-The watermark retrieval rate is the fraction of queries retrieving at least one injected watermark.
-
 ### Robustness
 
-Evaluate probe responses after watermark transformations:
+Place attack-query JSON lists under `datasets/special_query_attack/acronym_all/`. Each record contains `watermark_path` pointing to a transformed image, `gt`, and `special_query`.
 
 ```bash
 python -m experiments.robustness.table \
   --dataset MMQA \
-  --retriever_type clip \
   --generator_type Qwen2.5-VL-7B-Instruct \
   --watermark_type acronym_all \
   --retriever_device cuda:0 \
   --generator_device cuda:0
 ```
 
-Use `acronym`, `spatial`, or `opt` with the suffix `_rescale`, `_rotate`, `_gaussian`, or `_all`. The [attack query format](docs/DATA.md#attack-queries) describes file locations and the `--json_dir` override.
+Select transformations with `_rescale`, `_rotate`, `_gaussian`, or `_all`, and use `--json_dir` to specify the corresponding query directory. Image transformation helpers are in `experiments/robustness/process_img.py`.
 
 ### Stealthiness
 
@@ -157,40 +162,12 @@ Measure how often normal queries retrieve injected watermark images:
 ```bash
 python -m experiments.stealthiness.calculate_retrieval_ratio \
   --dataset WebQA \
-  --retriever_type clip \
   --generator_type None \
   --watermark_type acronym \
   --normal_queries_path datasets/WebQA/jsons/WebQA_train_val.json \
   --inject_num_list 1 50 100 1000 10000 \
   --retriever_device cuda:0
 ```
-
-## Repository structure
-
-```text
-AQUA/
-├── multimodalrag.py        # Retrieval, generation, and watermark injection
-├── experiments/           # Effectiveness, harmlessness, robustness, stealthiness
-├── utils/                 # FAISS construction and index metadata
-├── Qwen_VL_Chat/           # Qwen-VL-Chat model integration
-├── qwenvl/                # Qwen chat helpers
-├── prompts/               # Data-generation prompt templates
-├── datasets/              # Data workspace
-├── docs/DATA.md            # Data sources, directory layout, and JSON formats
-├── tests/                 # Regression and model compatibility tests
-├── requirements-test.txt  # CPU test dependencies
-└── environment.yml        # Runtime environment
-```
-
-## Development
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the CPU test environment and contribution workflow. Run the suite with:
-
-```bash
-python -m pytest -q tests
-```
-
-GitHub Actions runs the CPU suite on Python 3.10 and 3.12. The model compatibility tests use the installed Transformers and FAISS packages when available.
 
 ## Citation
 
@@ -206,8 +183,6 @@ GitHub Actions runs the CPU suite on Python 3.10 and 3.12. The model compatibili
 }
 ```
 
-## License and acknowledgements
+## License
 
-AQUA's original code is released under the [MIT License](LICENSE). The Qwen-VL-Chat integration includes the upstream [Tongyi Qianwen license](Qwen_VL_Chat/LICENSE) and [attribution notice](Qwen_VL_Chat/NOTICE).
-
-AQUA builds on [Transformers](https://github.com/huggingface/transformers), [FAISS](https://github.com/facebookresearch/faiss), [Qwen-VL](https://github.com/QwenLM/Qwen-VL), [MultiModalQA](https://github.com/allenai/multimodalqa), and [WebQA](https://github.com/WebQnA/WebQA).
+AQUA's original code is released under the [MIT License](LICENSE). The Qwen-VL-Chat integration retains its upstream [license](Qwen_VL_Chat/LICENSE) and [attribution](Qwen_VL_Chat/NOTICE).

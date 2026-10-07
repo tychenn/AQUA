@@ -1,60 +1,54 @@
-# Python environments and build products
-__pycache__/
-*.py[cod]
-*.so
-.venv/
-venv/
-env/
-ENV/
-__pypackages__/
-build/
-dist/
-*.egg-info/
-.eggs/
+# Track only the reproduction code, runtime setup, and README assets.
+/*
+!/.gitignore
+!/LICENSE
+!/Qwen_VL_Chat/
+!/README.md
+!/assets/
+!/environment.yml
+!/experiments/
+!/multimodalrag.py
+!/qwenvl/
+!/utils/
 
-# Tests and generated reports
-.pytest_cache/
-.hypothesis/
-.tox/
-.nox/
-.coverage
-.coverage.*
-coverage.xml
-htmlcov/
-*.log
+/Qwen_VL_Chat/*
+!/Qwen_VL_Chat/LICENSE
+!/Qwen_VL_Chat/NOTICE
+!/Qwen_VL_Chat/__init__.py
+!/Qwen_VL_Chat/configuration_qwen.py
+!/Qwen_VL_Chat/modeling_qwen.py
+!/Qwen_VL_Chat/qwen_generation_utils.py
+!/Qwen_VL_Chat/visual.py
 
-# Local data, weights, indices, and outputs
-/datasets/*
-!/datasets/.gitkeep
-/models/
-/results/
-*.index
-*.faiss
-*.pkl
-*.pt
-*.pth
-*.safetensors
+/assets/*
+!/assets/method.png
 
-# Local configuration and editors
-.env
-.env.*
-!.env.example
-.vscode/
-.idea/
-.cursorignore
-.ipynb_checkpoints/
-.DS_Store
-.cache/
-.claude/
-CLAUDE.md
+/experiments/*
+!/experiments/effectiveness/
+!/experiments/harmlessness/
+!/experiments/retrieval_data.py
+!/experiments/robustness/
+!/experiments/stealthiness/
 
-# Local experiment workspaces and external checkouts
-/TinyLLaVABench/
-/WAVES/
-/image_hijacks/
-/mmjbench/
-/rebuttal/
-/dummy_dataset/
-/test/
-/iclr2026_conference.pdf
-/utils/download_webqa.ipynb
+/experiments/effectiveness/*
+!/experiments/effectiveness/CGSR.py
+!/experiments/effectiveness/calculate_fprtpr.py
+!/experiments/effectiveness/pvalue.py
+!/experiments/effectiveness/rank.py
+
+/experiments/harmlessness/*
+!/experiments/harmlessness/normal_query.py
+
+/experiments/robustness/*
+!/experiments/robustness/process_img.py
+!/experiments/robustness/table.py
+
+/experiments/stealthiness/*
+!/experiments/stealthiness/calculate_retrieval_ratio.py
+
+/qwenvl/*
+!/qwenvl/run_qwenvl.py
+
+/utils/*
+!/utils/index_metadata.py
+!/utils/indexing_faiss.py
